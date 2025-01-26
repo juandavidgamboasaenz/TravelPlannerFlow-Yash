@@ -1,21 +1,72 @@
 package main
 
 import (
-  "fmt"
+	"context"
+	"errors"
+	"fmt"
+	"github.com/firebase/genkit/go/ai"
+	"github.com/firebase/genkit/go/genkit"
+	"github.com/firebase/genkit/go/plugins/googleai"
+	"google.golang.org/api/option"
+	"log"
+	"os"
 )
 
 //TIP <p>To run your code, right-click the code and select <b>Run</b>.</p> <p>Alternatively, click
 // the <icon src="AllIcons.Actions.Execute"/> icon in the gutter and select the <b>Run</b> menu item from here.</p>
 
 func main() {
-  //TIP <p>Press <shortcut actionId="ShowIntentionActions"/> when your caret is at the underlined text
-  // to see how GoLand suggests fixing the warning.</p><p>Alternatively, if available, click the lightbulb to view possible fixes.</p>
-  s := "gopher"
-  fmt.Println("Hello and welcome, %s!", s)
+	ctx := context.Background()
 
-  for i := 1; i <= 5; i++ {
-	//TIP <p>To start your debugging session, right-click your code in the editor and select the Debug option.</p> <p>We have set one <icon src="AllIcons.Debugger.Db_set_breakpoint"/> breakpoint
-	// for you, but you can always add more by pressing <shortcut actionId="ToggleLineBreakpoint"/>.</p>
-	fmt.Println("i =", 100/i)
-  }
+	gak := os.Getenv("GEMINI_API_KEY")
+	gp := os.Getenv("GEMINI_1.5_PRO")
+
+	if err := googleai.Init(ctx, &googleai.Config{
+		APIKey:        gak,
+		ClientOptions: []option.ClientOption{},
+	}); err != nil {
+		log.Fatalf("Failed to initialize Google AI plugin: %v", err)
+	}
+
+	out := genkit.DefineFlow("travelPlannerFlow", func(ctx context.Context, destination string) (string, error) {
+		model := googleai.Model(gp)
+		if model == nil {
+			return "", errors.New("travelPlannerFlow: couldn't find the Gemini travel model")
+		}
+		promptText := fmt.Sprintf("Create a 3-day itinerary for traveling to %s, focusing on local cuisine and sights.", destination)
+		gr, err := model.Generate(ctx,
+			ai.NewGenerateRequest(
+				&ai.GenerationCommonConfig{
+					MaxOutputTokens: 2048, // Reduced for example
+					Temperature:     0.7,
+					//Consider setting a specific Version or removing if default is desired
+				},
+				ai.NewUserTextMessage(promptText),
+			),
+			nil,
+		)
+		if err != nil {
+			return "", fmt.Errorf("travelPlannerFlow: failed to generate itinerary: %w", err)
+		}
+
+		if gr == nil {
+			return "", errors.New("travelPlannerFlow: generated response is nil")
+		}
+
+		itinerary := gr.Text()
+		fmt.Println(itinerary)
+
+		return itinerary, nil
+	})
+
+	s := out.Stream(ctx, "London")
+	for chunk := range s {
+		fmt.Println("stream: ", chunk)
+	}
+	// Initialize and un Genkit's flows server.
+	if err := genkit.Init(ctx, nil); err != nil {
+		log.Fatalf("Failed to initialize Genkit: %v", err)
+	}
+
+	log.Println("Genkit for Go - Travel PlannerFLow is up and running!")
 }
